@@ -368,7 +368,7 @@ func (cm *ContainerManager) RunContainer(opts docker.CreateContainerOptions) (ch
 	// start container
 	err = cm.StartContainer(container.ID, nil)
         fmt.Println("in RunContainer return code from startContainer", err)
-	//logerr(err)
+	logerr(err)
         if err != nil {
             c <- TaskResult{Error: err}
             return c, nil
