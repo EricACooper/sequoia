@@ -346,18 +346,33 @@ func (cm *ContainerManager) ContainerLogFile(image, ID string) string {
 }
 
 func (cm *ContainerManager) StartContainer(id string, hostConfig *docker.HostConfig) error {
-	return cm.Client.StartContainer(id, hostConfig)
+	err := cm.Client.StartContainer(id, hostConfig)
+        if err == nil {
+           // save ID
+           cm.IDs = append(cm.IDs, id)
+        }
+        return err
+}
+
+
+func (cm *ContainerManager) CreateContainer(opts docker.CreateContainerOptions)  (*docker.Container, error) {
+       return cm.Client.CreateContainer(opts)
 }
 
 func (cm *ContainerManager) RunContainer(opts docker.CreateContainerOptions) (chan TaskResult, *docker.Container) {
-	container, err := cm.Client.CreateContainer(opts)
+	container, err := cm.CreateContainer(opts)
 	logerr(err)
 
 	c := make(chan TaskResult)
 
 	// start container
 	err = cm.StartContainer(container.ID, nil)
-	logerr(err)
+        fmt.Println("in RunContainer return code from startContainer", err)
+	//logerr(err)
+        if err != nil {
+            c <- TaskResult{Error: err}
+            return c, nil
+        }
 
 	go cm.WaitContainer(container, c)
 
