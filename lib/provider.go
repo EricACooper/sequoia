@@ -239,11 +239,12 @@ func (p *DockerProvider) ProvideCouchbaseServers(servers []ServerSpec) {
 			//_, container := p.Cm.RunContainer(options)
                         fmt.Println("rc from CreateContainer", rc, container)
                         if rc == nil {
-                            time.Sleep( 20 * time.Second )
+                            time.Sleep( 60 * time.Second )
 			    rc = p.Cm.StartContainer(container.ID, &hostConfig)
                             fmt.Println("in provider.go, rc from StartContainer", rc, container)
 			    p.ActiveContainers[container.Name] = container.ID
 			    colorsay("start couchbase http://" + p.GetRestUrl(serverName))
+                            time.Sleep( 10 * time.Second )
 			    i++
                         }
 		}
