@@ -1,7 +1,7 @@
 package main
 
 import (
-	S "github.com/couchbaselabs/sequoia/lib"
+	S "github.com/EricACooper/sequoia/lib"
 )
 
 func main() {
