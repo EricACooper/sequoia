@@ -238,15 +238,18 @@ func (p *DockerProvider) ProvideCouchbaseServers(servers []ServerSpec) {
 			container, rc  := p.Cm.CreateContainer(options)
 			//_, container := p.Cm.RunContainer(options)
                         fmt.Println("rc from CreateContainer", rc, container)
+                        fmt.Print()
                         if rc == nil {
                             time.Sleep( 60 * time.Second )
 			    rc = p.Cm.StartContainer(container.ID, &hostConfig)
                             fmt.Println("in provider.go, rc from StartContainer", rc, container)
+                            fmt.Print()
                             if rc != nil {
                                 fmt.Println("retrying the start")
                                 time.Sleep( 60 * time.Second )
                                 rc = p.Cm.StartContainer(container.ID, &hostConfig)
                                 fmt.Println("retry, rc from StartContainer", rc, container)
+                                fmt.Print()
                                 // for now assume success
                             }
 			    p.ActiveContainers[container.Name] = container.ID
