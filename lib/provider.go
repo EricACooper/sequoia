@@ -10,7 +10,6 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
-        "time"
 )
 
 type Provider interface {
