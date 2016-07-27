@@ -172,11 +172,33 @@ func (p *DockerProvider) NumCouchbaseServers() int {
 	containers, err := p.Cm.Client.ListContainers(opts)
 	chkerr(err)
 	for _, c := range containers {
+                for _, p := range c.Ports {
+                     fmt.Println("port stuff", p.PrivatePort, p.PublicPort, p.Type, p.IP)
+                }
 		if strings.Index(c.Image, "couchbase") > -1 {
 			count++
 		}
 	}
 	return count
+}
+
+
+func (p *DockerProvider) GetFreeHostPort() int {
+
+        maxPort := 8091
+        opts := docker.ListContainersOptions{All: true}
+        containers, err := p.Cm.Client.ListContainers(opts)
+        chkerr(err)
+        for _, c := range containers {
+                for _, p := range c.Ports {
+                     if p.PrivatePort == 8091 && int(p.PublicPort) > maxPort {
+                         maxPort = int(p.PublicPort)
+                         break
+                     }
+                }
+        }
+        fmt.Println("max port is", maxPort)
+        return maxPort + 1
 }
 
 func (p *DockerProvider) ProvideCouchbaseServers(servers []ServerSpec) {
@@ -185,14 +207,20 @@ func (p *DockerProvider) ProvideCouchbaseServers(servers []ServerSpec) {
 	ReadYamlFile("providers/docker/options.yml", &providerOpts)
 	var build = providerOpts.Build
 
+        freePort := 0
+
 	// start based on number of containers
-	var i int = p.NumCouchbaseServers()
-	p.StartPort = 8091 + i
+	//var i int = p.NumCouchbaseServers()
+	////p.StartPort = 8091 + i
 	for _, server := range servers {
+                fmt.Println("ProvideCouchbaseServers loop, the server is ", server.Name)
 		serverNameList := ExpandServerName(server.Name, server.Count, server.CountOffset+1)
 
 		for _, serverName := range serverNameList {
-			portStr := fmt.Sprintf("%d", 8091+i)
+                        fmt.Println("ProvideCouchbaseServers loop 2, the server is ", serverName)
+			//portStr := fmt.Sprintf("%d", 8091+i)
+                        freePort = p.GetFreeHostPort()
+			portStr := fmt.Sprintf("%d", freePort )
 			port := docker.Port("8091/tcp")
 			binding := make([]docker.PortBinding, 1)
 			binding[0] = docker.PortBinding{
@@ -256,10 +284,11 @@ func (p *DockerProvider) ProvideCouchbaseServers(servers []ServerSpec) {
 			    p.ActiveContainers[container.Name] = container.ID
 			    colorsay("start couchbase http://" + p.GetRestUrl(serverName))
                             //time.Sleep( 10 * time.Second )
-			    i++
+			    //i++
                         }
 		}
 	}
+	p.StartPort = freePort
 }
 
 func (p *DockerProvider) GetLinkPairs() string {
@@ -280,6 +309,7 @@ func (p *DockerProvider) GetRestUrl(name string) string {
 	re := regexp.MustCompile(`:.*`)
 	host = re.ReplaceAllString(host, "")
 	port := p.StartPort
+        fmt.Println("GetRestUrl startPort is", port) 
 	for _, spec := range p.Servers {
 		for i, server := range spec.Names {
 			if server == name {
