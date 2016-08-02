@@ -352,6 +352,7 @@ func (t *Test) runTask(scope *Scope, task *ContainerTask, action *ActionSpec) {
 			before := ParseTemplate(scope, actionBefore)
 			ready, err = strconv.ParseBool(before)
 			logerr(err)
+			time.Sleep(5 * time.Second)
 		}
 	}
 
@@ -429,12 +430,12 @@ func (t *Test) ResolveTemplateActions(scope Scope, action ActionSpec) []ActionSp
 			}
 
 			idx := fmt.Sprintf("$%d", i-argOffset)
-			subAction.Command = strings.Replace(subAction.Command, idx, arg, 1)
+			subAction.Command = strings.Replace(subAction.Command, idx, arg, -1)
 			if subAction.Until != "" {
-				subAction.Until = strings.Replace(subAction.Until, idx, arg, 1)
+				subAction.Until = strings.Replace(subAction.Until, idx, arg, -1)
 			}
 			if subAction.Args != "" {
-				subAction.Args = strings.Replace(subAction.Args, idx, arg, 1)
+				subAction.Args = strings.Replace(subAction.Args, idx, arg, -1)
 			}
 		}
 
@@ -483,7 +484,7 @@ func (t *Test) WatchErrorChan(echan chan error, n int, scope *Scope) {
 				// print test results
 				t.Cm.TapHandle.AutoPlan()
 				// exit
-				os.Exit(1)
+				os.Exit(0)
 			}
 		}
 	}
