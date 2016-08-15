@@ -366,6 +366,7 @@ func (cm *ContainerManager) RunContainer(opts docker.CreateContainerOptions) (ch
 	c := make(chan TaskResult)
 
 	// start container
+        time.Sleep(10 * time.Second)
 	err = cm.StartContainer(container.ID, nil)
         fmt.Print("\n\n")
         fmt.Println("in RunContainer return code from startContainer", err)
