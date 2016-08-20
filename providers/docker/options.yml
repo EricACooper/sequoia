@@ -12,7 +12,7 @@ cpuperiod: 100000
 # Microseconds of CPU time that the container can get in a CPU period.
 # Default is 100ms which is 100% of a 100ms CpuPeriod
 # which means setting this value to 20ms results in 20% CPU
-cpuquota:  50000
+cpuquota:  200000
 
  # Hard Memory limit in bytes.
  # The default of (0) will be presented with entire machine memory to container
