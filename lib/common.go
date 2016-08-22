@@ -11,6 +11,7 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
+	"path"
 	"regexp"
 	"strings"
 	"time"
@@ -74,12 +75,16 @@ func ExpandName(name string, count, offset uint8) []string {
 	return names
 }
 
+func DoUnmarshal(in []byte, out interface{}) {
+	err := yaml.Unmarshal(in, out)
+	chkerr(err)
+}
+
 func ReadYamlFile(filename string, spec interface{}) {
 	source, err := ioutil.ReadFile(filename)
 	chkerr(err)
 
-	err = yaml.Unmarshal(source, spec)
-	chkerr(err)
+	DoUnmarshal(source, spec)
 	fmt.Println(color.CyanString("\u2192 "), color.WhiteString("parsed %s", filename))
 }
 
@@ -168,4 +173,12 @@ func CommaStrToList(str string) []string {
 		parts = append(parts, strings.TrimSpace(s))
 	}
 	return parts
+}
+
+func PathToFilename(p string) string {
+	return path.Base(p)
+}
+
+func PathToDir(p string) string {
+	return path.Dir(p)
 }

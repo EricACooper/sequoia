@@ -33,17 +33,54 @@ type ActionSpec struct {
 	Args        string
 	Test        string
 	Scope       string
+	ForEach     string
 	Client      ClientActionSpec
+}
+
+// returns yaml formattable string
+func (a *ActionSpec) String() string {
+	return fmt.Sprintf(
+		`-
+ image: %q
+ command: %q
+ wait: %t
+ before: %q
+ entrypoint: %q
+ requires: %q
+ concurrency: %q
+ duration: %q
+ alias: %q
+ repeat: %d
+ template: %q
+ args: %q
+ client: %v
+`, a.Image, a.Command, a.Wait, a.Before, a.Entrypoint, a.Requires,
+		a.Concurrency, a.Duration, a.Alias, a.Repeat,
+		a.Template, a.Args, a.Client)
 }
 
 type TemplateSpec struct {
 	Name    string
 	Actions []ActionSpec
+	ForEach string
 }
 
 type ClientActionSpec struct {
 	Op        string
 	Container string
+	FromPath  string
+	ToPath    string
+}
+
+func (c ClientActionSpec) String() string {
+
+	return fmt.Sprintf(`
+    op: %q
+    container: %q
+    frompath: %q
+    topath: %q`,
+		c.Op, c.Container,
+		c.FromPath, c.ToPath)
 }
 
 func ActionsFromFile(fileName string) []ActionSpec {
@@ -59,6 +96,12 @@ func ActionsFromArgs(image string, command string, wait bool) []ActionSpec {
 		Wait:    wait,
 	}
 	return []ActionSpec{action}
+}
+
+func ActionsFromString(actionStr string) []ActionSpec {
+	var resolvedActions = []ActionSpec{}
+	DoUnmarshal([]byte(actionStr), &resolvedActions)
+	return resolvedActions
 }
 
 func NewTest(flags TestFlags, cm *ContainerManager) Test {
@@ -148,22 +191,47 @@ func (t *Test) runActions(scope Scope, loop int, actions []ActionSpec) {
 	// run all actions in test
 	for _, action := range actions {
 
+		if action.ForEach != "" {
+			// resolve foreach template (must result in an iterable)
+			// create actions with '.' as the output of the range
+			rangeActions := t.ResolveSingleRangeActions(scope, action)
+			t.runActions(scope, loop, rangeActions)
+			continue
+		}
+
 		if action.Client.Op != "" {
+			key := action.Client.Container
+
 			// is a client op
 			switch action.Client.Op {
 			case "kill":
-				key := action.Client.Container
 				if id, ok := scope.GetVarsKV(key); ok {
 					t.Cm.KillContainer(id)
 					colorsay("kill" + key)
+				} else {
+					ecolorsay("no such container alias " + key)
 				}
 			case "rm":
-				key := action.Client.Container
 				if id, ok := scope.GetVarsKV(key); ok {
 					t.Cm.RemoveContainer(id)
 					colorsay("remove " + key)
+				} else {
+					ecolorsay("no such container alias " + key)
 				}
-
+			case "cp":
+				if id, ok := scope.GetVarsKV(key); ok {
+					t.Cm.CopyFromContainer(id,
+						PathToFilename(action.Client.ToPath),
+						action.Client.FromPath,
+						PathToDir(action.Client.ToPath))
+					msg := fmt.Sprintf("copying files from %s:%s to %s",
+						id[:6],
+						action.Client.FromPath,
+						action.Client.ToPath)
+					colorsay(msg)
+				} else {
+					ecolorsay("no such container alias " + key)
+				}
 			}
 			continue
 		}
@@ -226,7 +294,7 @@ func (t *Test) runActions(scope Scope, loop int, actions []ActionSpec) {
 				// include template file
 				var spec []TemplateSpec
 				ReadYamlFile(includeFile, &spec)
-				t.CacheIncludedTemplate(spec)
+				t.CacheIncludedTemplate(scope, spec)
 			}
 			continue
 		}
@@ -342,6 +410,9 @@ func (t *Test) runTask(scope *Scope, task *ContainerTask, action *ActionSpec) {
 	aliasKey := action.Alias
 	if aliasKey == "" {
 		aliasKey = RandStr(6)
+	} else {
+		// parse alias
+		aliasKey = ParseTemplate(scope, aliasKey)
 	}
 
 	// if command has 'before' then cannot start processing until ready
@@ -386,9 +457,14 @@ func (t *Test) runTask(scope *Scope, task *ContainerTask, action *ActionSpec) {
 
 }
 
-func (t *Test) CacheIncludedTemplate(spec []TemplateSpec) {
+func (t *Test) CacheIncludedTemplate(scope Scope, spec []TemplateSpec) {
 
 	for _, template := range spec {
+		if template.ForEach != "" {
+			// this template is within a range loop
+			// so extrapolate actions
+			template.Actions = t.ResolveTemplateRangeActions(scope, template.Actions, template.ForEach)
+		}
 		t.Templates[template.Name] = template.Actions
 	}
 }
@@ -400,6 +476,7 @@ func (t *Test) ResolveTemplateActions(scope Scope, action ActionSpec) []ActionSp
 	var cachedActions = t.Templates[action.Template]
 
 	for _, subAction := range cachedActions {
+
 		// replace generics args ie $1, $2 with test values
 		args := ParseTemplate(&scope, action.Args)
 		allArgs := strings.Split(args, ",")
@@ -430,13 +507,25 @@ func (t *Test) ResolveTemplateActions(scope Scope, action ActionSpec) []ActionSp
 			}
 
 			idx := fmt.Sprintf("$%d", i-argOffset)
-			subAction.Command = strings.Replace(subAction.Command, idx, arg, -1)
-			if subAction.Until != "" {
-				subAction.Until = strings.Replace(subAction.Until, idx, arg, -1)
-			}
-			if subAction.Args != "" {
-				subAction.Args = strings.Replace(subAction.Args, idx, arg, -1)
-			}
+
+			// reformat action to string
+			actionStr := fmt.Sprintf("%s", &subAction)
+
+			// replace any magic vars ... ie $0, $1 with args
+			actionStr = strings.Replace(actionStr, idx, arg, -1)
+			subAction.Until = strings.Replace(subAction.Until, idx, arg, -1)
+			subAction.Before = strings.Replace(subAction.Before, idx, arg, -1)
+			subAction.Requires = strings.Replace(subAction.Requires, idx, arg, -1)
+
+			// unmarshal string back to action array
+			var resolvedActions = []ActionSpec{}
+			DoUnmarshal([]byte(actionStr), &resolvedActions)
+			resolvedSubAction := resolvedActions[0]
+
+			// restore keys lost during unmarshal
+			resolvedSubAction.ForEach = subAction.ForEach
+			t.RestoreConditionalValues(subAction, &resolvedSubAction)
+			subAction = resolvedSubAction
 		}
 
 		// allow inheritance
@@ -464,10 +553,66 @@ func (t *Test) ResolveTemplateActions(scope Scope, action ActionSpec) []ActionSp
 		if subAction.Until == "" {
 			subAction.Until = action.Until
 		}
+
 		resolvedActions = append(resolvedActions, subAction)
 	}
 
 	return resolvedActions
+}
+
+func (t *Test) ResolveSingleRangeActions(scope Scope, action ActionSpec) []ActionSpec {
+	return t.ResolveTemplateRangeActions(scope, []ActionSpec{action}, action.ForEach)
+}
+
+func (t *Test) ResolveTemplateRangeActions(scope Scope, actions []ActionSpec, rangeStr string) []ActionSpec {
+
+	var resolvedActions = []ActionSpec{}
+
+	// begin range templat
+	rangeTemplate := rangeStr
+
+	// convert each contextual action spec to a string
+	for _, a := range actions {
+		actionStr := fmt.Sprintf("%s", &a)
+
+		// append the range template with the action a spec appended
+		rangeTemplate = fmt.Sprintf("%s\n%s", rangeTemplate, actionStr)
+	}
+
+	// close range template
+	rangeTemplate = fmt.Sprintf("%s\n{{end}}", rangeTemplate)
+
+	// compile the range template with nested action spec
+	compiledTemplate := ParseTemplate(&scope, rangeTemplate)
+	// convert the result from yaml back to action array
+	DoUnmarshal([]byte(compiledTemplate), &resolvedActions)
+
+	// restore conditional specs which are not inlcuded in the marshlling
+	t.RestoreConditionalValuesRange(actions, &resolvedActions)
+	return resolvedActions
+}
+
+func (t *Test) RestoreConditionalValuesRange(originalActions []ActionSpec, actions *[]ActionSpec) {
+
+	// when creating templates from a range, certain conditions are removed
+	// to prevent the template compiler from operating on them.
+	// this method restores them for run time
+	step := len(originalActions)
+	offset := 0
+	for i, a := range originalActions {
+		for j, _ := range *actions {
+			offset = i + j*step
+			if offset < len(*actions) {
+				t.RestoreConditionalValues(a, &(*actions)[offset])
+			}
+		}
+	}
+}
+
+func (t *Test) RestoreConditionalValues(originalAction ActionSpec, action *ActionSpec) {
+	action.Until = originalAction.Until
+	action.Before = originalAction.Before
+	action.Requires = originalAction.Requires
 }
 
 func (t *Test) WatchErrorChan(echan chan error, n int, scope *Scope) {
@@ -477,7 +622,7 @@ func (t *Test) WatchErrorChan(echan chan error, n int, scope *Scope) {
 	for i := 0; i < n; i++ {
 		if err := <-echan; err != nil {
 			if *t.Flags.CollectOnError == true {
-				scope.CollectInfo()
+				t.CollectInfo(*scope)
 			}
 
 			if *t.Flags.StopOnError == true {
@@ -489,6 +634,28 @@ func (t *Test) WatchErrorChan(echan chan error, n int, scope *Scope) {
 		}
 	}
 	close(echan)
+}
+
+func (t *Test) CollectInfo(scope Scope) {
+
+	// disable collect on where when collecting
+	oldFlagVal := t.Flags.CollectOnError
+	disabledFlagVal := false
+	t.Flags.CollectOnError = &disabledFlagVal
+
+	// construst a collect action
+	platform := scope.GetPlatform()
+	actionStr := fmt.Sprintf(`
+-
+  include: tests/templates/util.yml
+-
+  template: cbcollect_all_%s_nodes
+  wait: true`, platform)
+	actions := ActionsFromString(actionStr)
+
+	// start collection
+	t.runActions(scope, 0, actions)
+	t.Flags.CollectOnError = oldFlagVal
 }
 
 func (t *Test) KillTaskContainers(task *ContainerTask) {
@@ -558,7 +725,7 @@ func (t *Test) Cleanup(s Scope) {
 	if s.Provider.GetType() == "docker" {
 		// save logs
 		if *t.Flags.LogLevel > 0 {
-			s.Provider.(*DockerProvider).Cm.SaveContainerLogs(*t.Flags.LogDir)
+			s.Provider.(*DockerProvider).Cm.SaveCouchbaseContainerLogs(*t.Flags.LogDir)
 		}
 		s.Provider.(*DockerProvider).Cm.RemoveManagedContainers(soft)
 	}

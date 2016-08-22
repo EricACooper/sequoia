@@ -10,7 +10,7 @@ type BucketSpec struct {
 	Names     []string
 	Count     uint8
 	Ram       string
-	Replica   uint8
+	Replica   *uint8
 	Type      string
 	Sasl      string
 	Eviction  string
@@ -28,6 +28,8 @@ type ServerSpec struct {
 	FtsRam       string `yaml:"fts_ram"`
 	RestUsername string `yaml:"rest_username"`
 	RestPassword string `yaml:"rest_password"`
+	SSHUsername  string `yaml:"ssh_username"`
+	SSHPassword  string `yaml:"ssh_password"`
 	RestPort     string `yaml:"rest_port"`
 	ViewPort     string `yaml:"view_port"`
 	QueryPort    string `yaml:"query_port"`
@@ -169,6 +171,10 @@ func (s *ScopeSpec) ToAttr(attr string) string {
 		return "RestUsername"
 	case "rest_password":
 		return "RestPassword"
+	case "ssh_username":
+		return "SSHUsername"
+	case "ssh_password":
+		return "SSHPassword"
 	case "name":
 		return "Name"
 	case "ram":
@@ -235,9 +241,7 @@ func SpecFromYaml(fileName string) ScopeSpec {
 		if spec.Buckets[i].Type == "" {
 			spec.Buckets[i].Type = "couchbase"
 		}
-		if spec.Buckets[i].Replica == 0 {
-			spec.Buckets[i].Replica = 1
-		}
+
 		if bucket.DDocs != "" {
 			ddocNames := CommaStrToList(bucket.DDocs)
 			for _, ddocName := range ddocNames {
@@ -253,6 +257,7 @@ func SpecFromYaml(fileName string) ScopeSpec {
 	for i, server := range spec.Servers {
 		spec.Servers[i].Names = ExpandServerName(server.Name, server.Count, 1)
 		spec.Servers[i].BucketSpecs = make([]BucketSpec, 0)
+
 		// map server buckets to bucket objects
 		bucketList := CommaStrToList(spec.Servers[i].Buckets)
 		for _, bucketName := range bucketList {
@@ -265,6 +270,17 @@ func SpecFromYaml(fileName string) ScopeSpec {
 	}
 
 	return spec
+
+}
+
+// some common defaults when not defined in yaml scope
+func SetYamlSpecDefaults(spec *ServerSpec) {
+	if spec.RestUsername == "" {
+		spec.RestUsername = "Administrator"
+	}
+	if spec.RestPassword == "" {
+		spec.RestPassword = "password"
+	}
 }
 
 func SpecFromIni(fileName string) ScopeSpec {
@@ -303,6 +319,17 @@ func SpecFromIni(fileName string) ScopeSpec {
 		} else {
 			serverSpec.RestPassword = "password"
 		}
+		if username := section.Key("ssh_username"); username.String() != "" {
+			serverSpec.SSHUsername = username.String()
+		} else {
+			serverSpec.SSHUsername = "root"
+		}
+		if password := section.Key("ssh_password"); password.String() != "" {
+			serverSpec.SSHPassword = password.String()
+		} else {
+			serverSpec.SSHPassword = "couchbase"
+		}
+
 		if services := section.Key("services"); services.String() != "" {
 			svcString := services.String()
 			svcString = strings.Replace(svcString, "kv", "data", 1)

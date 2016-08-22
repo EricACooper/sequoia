@@ -23,7 +23,7 @@ type Provider interface {
 type FileProvider struct {
 	Servers      []ServerSpec
 	ServerNameIp map[string]string
-    HostFile     string
+	HostFile     string
 }
 type ClusterRunProvider struct {
 	Servers      []ServerSpec
@@ -40,17 +40,17 @@ type DockerProvider struct {
 }
 
 type DockerProviderOpts struct {
-	Build             string
-	BuildUrlOverride  string `yaml:"build_url_override"`
-	CPUPeriod         int64
-	CPUQuota          int64
-	Memory            int64
-	MemorySwap        int64
-	Ulimits           []docker.ULimit
+	Build            string
+	BuildUrlOverride string `yaml:"build_url_override"`
+	CPUPeriod        int64
+	CPUQuota         int64
+	Memory           int64
+	MemorySwap       int64
+	Ulimits          []docker.ULimit
 }
 
 func (opts *DockerProviderOpts) MemoryMB() int {
-	return int(opts.Memory/1000000)  // B -> MB
+	return int(opts.Memory / 1000000) // B -> MB
 }
 
 func NewProvider(flags TestFlags, servers []ServerSpec) Provider {
@@ -75,7 +75,7 @@ func NewProvider(flags TestFlags, servers []ServerSpec) Provider {
 		provider = &FileProvider{
 			servers,
 			make(map[string]string),
-            hostFile,
+			hostFile,
 		}
 	case "dev":
 		endpoint := "127.0.0.1"
@@ -248,11 +248,11 @@ func (p *DockerProvider) ProvideCouchbaseServers(servers []ServerSpec) {
 			}
 
 			if p.Opts.CPUPeriod > 0 {
-			        hostConfig.CPUPeriod = p.Opts.CPUPeriod
+				hostConfig.CPUPeriod = p.Opts.CPUPeriod
 			}
 			if p.Opts.CPUQuota > 0 {
-			        hostConfig.CPUQuota = p.Opts.CPUQuota
-		    }
+				hostConfig.CPUQuota = p.Opts.CPUQuota
+			}
 			if p.Opts.Memory > 0 {
 				hostConfig.Memory = p.Opts.Memory
 			}
@@ -326,27 +326,30 @@ func (p *DockerProvider) GetLinkPairs() string {
 	return strings.Join(pairs, ",")
 }
 
-func (p *DockerProvider) GetRestUrl(name string) string {
-	// extract host from endpoint
-	url, err := url.Parse(p.Cm.Endpoint)
-	chkerr(err)
-	host := url.Host
+unc (p *DockerProvider) GetRestUrl(name string) string {
+        // extract host from endpoint
+        url, err := url.Parse(p.Cm.Endpoint)
+        chkerr(err)
+        host := url.Host
 
-	// remove port if specified
-	re := regexp.MustCompile(`:.*`)
-	host = re.ReplaceAllString(host, "")
-	port := p.StartPort
-        fmt.Println("GetRestUrl startPort is", port) 
-	for _, spec := range p.Servers {
-		for i, server := range spec.Names {
-			if server == name {
-				port = port + i
-			}
-		}
-	}
-	host = fmt.Sprintf("%s:%d\n", host, port)
-	return strings.TrimSpace(host)
+        // remove port if specified
+        re := regexp.MustCompile(`:.*`)
+        host = re.ReplaceAllString(host, "")
+        port := p.StartPort
+        step := len(p.Servers)
+        for i, spec := range p.Servers {
+                for j, server := range spec.Names {
+                        if server == name {
+                                port = port + i + j*step
+                        }
+                }
+        }
+
+        host = fmt.Sprintf("%s:%d\n", host, port)
+        return strings.TrimSpace(host)
 }
+
+
 
 func BuildArgsForVersion(opts *DockerProviderOpts) []docker.BuildArg {
 

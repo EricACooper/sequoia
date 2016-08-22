@@ -14,10 +14,10 @@ package sequoia
 
 import (
 	"fmt"
+	"github.com/streamrail/concurrent-map"
 	"regexp"
 	"strconv"
 	"strings"
-	"sync"
 )
 
 type Scope struct {
@@ -26,9 +26,8 @@ type Scope struct {
 	Provider Provider
 	Flags    TestFlags
 	Version  string
-	Vars     map[string]string
+	Vars     cmap.ConcurrentMap
 	Loops    int
-	VarsMtx  sync.RWMutex
 }
 
 func NewScope(flags TestFlags, cm *ContainerManager) Scope {
@@ -69,7 +68,6 @@ func NewScope(flags TestFlags, cm *ContainerManager) Scope {
 			}
 		}
 	}
-	var mtx sync.RWMutex
 	var loops = 0
 	if *flags.Continue == true {
 		loops++ // we've already done first pass
@@ -81,9 +79,8 @@ func NewScope(flags TestFlags, cm *ContainerManager) Scope {
 		provider,
 		flags,
 		"",
-		make(map[string]string),
+		cmap.New(),
 		loops,
-		mtx,
 	}
 }
 
@@ -380,12 +377,16 @@ func (s *Scope) CreateBuckets() {
 					nodeRam, _ := strconv.Atoi(server.Ram)
 					ramQuota = strconv.Itoa((nodeRam * ramVal) / 100)
 				}
+				var replica uint8 = 1
+				if bucket.Replica != nil {
+					replica = *bucket.Replica
+				}
 				command := []string{"bucket-create", "-c", ip,
 					"-u", server.RestUsername, "-p", server.RestPassword,
 					"--bucket", bucketName,
 					"--bucket-ramsize", ramQuota,
 					"--bucket-type", bucket.Type,
-					"--bucket-replica", strconv.Itoa(int(bucket.Replica)),
+					"--bucket-replica", strconv.Itoa(int(replica)),
 					"--enable-flush", "1", "--wait",
 				}
 				if bucket.Sasl != "" {
@@ -414,40 +415,6 @@ func (s *Scope) CreateBuckets() {
 	// apply only to orchestrator
 	s.Spec.ApplyToServers(operation, 0, 1)
 
-}
-
-func (s *Scope) CollectInfo() {
-
-	var image = "sequoiatools/couchbase-cli"
-
-	// do cbcollect on all clusters
-	operation := func(name string, server *ServerSpec) {
-
-		orchestrator := server.Names[0]
-		orchestratorIp := s.Provider.GetHostAddress(orchestrator)
-
-		command := []string{"collect-logs-start",
-			"-c", orchestratorIp,
-			"-u", server.RestUsername,
-			"-p", server.RestPassword,
-			"--all-nodes",
-		}
-		desc := "collect info" + orchestratorIp
-		task := ContainerTask{
-			Describe: desc,
-			Image:    image,
-			Command:  command,
-			Async:    false,
-		}
-		if s.Provider.GetType() == "docker" {
-			task.LinksTo = orchestrator
-		}
-
-		s.Cm.Run(&task)
-	}
-
-	// apply only to orchestrator
-	s.Spec.ApplyToServers(operation, 0, 1)
 }
 
 func (s *Scope) GetPercOfMemTotal(name string, server *ServerSpec, quota string) string {
@@ -706,15 +673,18 @@ func (s *Scope) RemoveNodes() {
 	s.Spec.ApplyToAllServers(rmNodesOp)
 }
 
+func (s *Scope) GetPlatform() string {
+	return *s.Flags.Platform
+}
+
 func (s *Scope) SetVarsKV(key, id string) {
-	s.VarsMtx.Lock()
-	s.Vars[key] = id
-	s.VarsMtx.Unlock()
+	s.Vars.Set(key, id)
 }
 
 func (s *Scope) GetVarsKV(key string) (string, bool) {
-	s.VarsMtx.RLock()
-	val, ok := s.Vars[key]
-	s.VarsMtx.RUnlock()
-	return val, ok
+	if val, ok := s.Vars.Get(key); ok {
+		return val.(string), ok
+	} else {
+		return "", false
+	}
 }

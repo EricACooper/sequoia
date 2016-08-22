@@ -31,6 +31,10 @@ func ParseTemplate(s *Scope, command string) string {
 		"ftoint":   tResolv.FloatToInt,
 		"last":     tResolv.LastItem,
 		"contains": tResolv.Contains,
+		"excludes": tResolv.Excludes,
+		"tolist":   tResolv.ToList,
+		"mkrange":  tResolv.MkRange,
+		"to_ip":    tResolv.ToIp,
 	}
 	tmpl, err := template.New("t").Funcs(netFunc).Parse(command)
 	logerr(err)
@@ -68,7 +72,7 @@ func (t *TemplateResolver) Scale(val int) string {
 	return strconv.Itoa(val * scale)
 }
 
-// resolve nodes with specified service
+// resolve nodes with specified service, ie..
 // .Nodes | .Service `n1ql` | net 0
 func (t *TemplateResolver) Service(service string, servers []ServerSpec) []ServerSpec {
 
@@ -120,6 +124,33 @@ func (t *TemplateResolver) Cluster(index int, servers []ServerSpec) []ServerSpec
 // Shortcut: .Nodes | .Cluster 0
 func (t *TemplateResolver) ClusterNodes() []ServerSpec {
 	return t.Cluster(0, t.Nodes())
+}
+
+// Retreive just hostnames from ServerSpec object
+func (t *TemplateResolver) NodeNames(servers []ServerSpec) []string {
+	names := []string{}
+	for _, spec := range servers {
+		for _, n := range spec.Names {
+			names = append(names, n)
+		}
+	}
+	return names
+}
+
+// Retreive just addresses from ServerSpec object
+func (t *TemplateResolver) NodeAddresses(servers []ServerSpec) []string {
+
+	ips := []string{}
+	names := t.NodeNames(servers)
+	for _, name := range names {
+		ip := t.Scope.Provider.GetHostAddress(name)
+		ips = append(ips, ip)
+	}
+	return ips
+}
+
+func (t *TemplateResolver) ToIp(name string) string {
+	return t.Scope.Provider.GetHostAddress(name)
 }
 
 // Shortcut: .ClusterNodes | net 0
@@ -183,12 +214,80 @@ func (t *TemplateResolver) Attr(key string, servers []ServerSpec) string {
 func (t *TemplateResolver) RestUsername() string {
 	nodes := t.ClusterNodes()
 	return t.Attr("rest_username", nodes)
+
 }
 
 // Shortcut:  .ClusterNodes | .Attr `rest_password`
 func (t *TemplateResolver) RestPassword() string {
 	nodes := t.ClusterNodes()
 	return t.Attr("rest_password", nodes)
+}
+
+// Shortcut:  .ClusterNodes | .Attr `ram`
+// Note this value adjusted by setup if %
+// but if setup was not run then 256 is returned
+func (t *TemplateResolver) Ram() string {
+	nodes := t.ClusterNodes()
+	ram := t.Attr("ram", nodes)
+
+	// if value is still a percent then
+	// resort to lowest value
+	if strings.Index(ram, "%") > -1 {
+		ram = "256"
+	}
+	return ram
+}
+
+// Shortcut:  .ClusterNodes | .Attr `ssh_username`
+func (t *TemplateResolver) SSHUsername() string {
+	nodes := t.ClusterNodes()
+	username := t.Attr("ssh_username", nodes)
+	if username == "" {
+		switch *t.Scope.Flags.Platform {
+		case "windows":
+			username = "Administrator"
+		default:
+			username = "root"
+		}
+	}
+
+	return username
+
+}
+
+// Shortcut:  .ClusterNodes | .Attr `ssh_password`
+func (t *TemplateResolver) SSHPassword() string {
+	nodes := t.ClusterNodes()
+	password := t.Attr("ssh_password", nodes)
+	if password == "" {
+		switch t.Scope.GetPlatform() {
+		case "windows":
+			password = "Membase123"
+		default:
+			password = "couchbase"
+		}
+	}
+
+	return password
+}
+
+// Get nodes from Cluster Spec that are not active
+func (t *TemplateResolver) SingleNodes(servers []ServerSpec) []string {
+
+	ips := []string{}
+	for _, spec := range servers {
+		for _, name := range spec.Names {
+			rest := t.Scope.Provider.GetRestUrl(name)
+			ok := NodeIsSingle(rest, spec.RestUsername, spec.RestPassword)
+			if ok == true {
+				ip := t.Scope.Provider.GetHostAddress(name)
+				ips = append(ips, ip)
+			}
+		}
+	}
+
+	return ips
+
 }
 
 // Template function: `net`
@@ -259,6 +358,10 @@ func (t *TemplateResolver) Contains(key, str string) bool {
 	return strings.Contains(str, key)
 }
 
+func (t *TemplateResolver) Excludes(key, str string) bool {
+	return !strings.Contains(str, key)
+}
+
 func (t *TemplateResolver) ToJson(data string) interface{} {
 	var kv interface{}
 	blob := []byte(data)
@@ -268,6 +371,23 @@ func (t *TemplateResolver) ToJson(data string) interface{} {
 		kv = nil
 	}
 	return kv
+}
+
+func (t *TemplateResolver) ToList(spec ServerSpec) []ServerSpec {
+	return []ServerSpec{spec}
+}
+
+func (t *TemplateResolver) MkRange(args ...int) []int {
+	s := []int{}
+	step := 1
+	if len(args) == 3 {
+		step = args[2]
+	}
+	for i := args[0]; i <= args[1]; i += step {
+		s = append(s, i)
+	}
+
+	return s
 }
 
 // returns status string of container id

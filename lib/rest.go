@@ -19,10 +19,22 @@ type NodeSelf struct {
 	Version           string
 }
 
+type NodeStatuses struct {
+	Statuses map[string]NodeStatus
+}
+
+type NodeStatus struct {
+	Status      map[string]string
+	Healthy     map[string]string
+	OtpNode     map[string]string
+	Replication map[string]int
+	Dataless    map[string]bool
+}
+
 func GetMemTotal(host, user, password string) int {
 	var n NodeSelf
 
-	err := jsonRequest(host, user, password, &n)
+	err := getNodeSelf(host, user, password, &n)
 	chkerr(err)
 
 	q := n.MemoryTotal
@@ -37,7 +49,7 @@ func GetMemTotal(host, user, password string) int {
 func GetMemReserved(host, user, password string) int {
 	var n NodeSelf
 
-	err := jsonRequest(host, user, password, &n)
+	err := getNodeSelf(host, user, password, &n)
 	chkerr(err)
 
 	q := n.McdMemoryReserved
@@ -51,7 +63,7 @@ func GetMemReserved(host, user, password string) int {
 func GetIndexQuota(host, user, password string) int {
 	var n NodeSelf
 
-	err := jsonRequest(host, user, password, &n)
+	err := getNodeSelf(host, user, password, &n)
 	chkerr(err)
 
 	q := n.IndexMemoryQuota
@@ -64,7 +76,7 @@ func GetIndexQuota(host, user, password string) int {
 
 func NodeHasService(service, host, user, password string) bool {
 	var n NodeSelf
-	err := jsonRequest(host, user, password, &n)
+	err := getNodeSelf(host, user, password, &n)
 	if err != nil {
 		return false
 	}
@@ -80,7 +92,7 @@ func NodeHasService(service, host, user, password string) bool {
 func GetServerVersion(host, user, password string) string {
 	var n NodeSelf
 
-	err := jsonRequest(host, user, password, &n)
+	err := getNodeSelf(host, user, password, &n)
 	chkerr(err)
 
 	q := n.Version
@@ -92,10 +104,27 @@ func GetServerVersion(host, user, password string) string {
 	return q
 }
 
-func jsonRequest(host, user, password string, v interface{}) error {
+func NodeIsSingle(host, user, password string) bool {
+
+	var n interface{}
+	err := getNodeStatus(host, user, password, &n)
+	chkerr(err)
+	s := n.(map[string]interface{})
+	return len(s) == 1
+}
+
+func getNodeStatus(host, user, password string, v interface{}) error {
+	return _jsonRequest("http://%s/nodeStatuses", host, user, password, v)
+}
+
+func getNodeSelf(host, user, password string, v interface{}) error {
+	return _jsonRequest("http://%s/nodes/self", host, user, password, v)
+}
+
+func _jsonRequest(url, host, user, password string, v interface{}) error {
 
 	// setup request url
-	urlStr := fmt.Sprintf("http://%s/nodes/self", host)
+	urlStr := fmt.Sprintf(url, host)
 	req, err := http.NewRequest("GET", urlStr, nil)
 	chkerr(err)
 	req.SetBasicAuth(user, password)
