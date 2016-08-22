@@ -326,27 +326,27 @@ func (p *DockerProvider) GetLinkPairs() string {
 	return strings.Join(pairs, ",")
 }
 
-unc (p *DockerProvider) GetRestUrl(name string) string {
-        // extract host from endpoint
-        url, err := url.Parse(p.Cm.Endpoint)
-        chkerr(err)
-        host := url.Host
+func (p *DockerProvider) GetRestUrl(name string) string {
+	// extract host from endpoint
+	url, err := url.Parse(p.Cm.Endpoint)
+	chkerr(err)
+	host := url.Host
 
-        // remove port if specified
-        re := regexp.MustCompile(`:.*`)
-        host = re.ReplaceAllString(host, "")
-        port := p.StartPort
-        step := len(p.Servers)
-        for i, spec := range p.Servers {
-                for j, server := range spec.Names {
-                        if server == name {
-                                port = port + i + j*step
-                        }
-                }
-        }
+	// remove port if specified
+	re := regexp.MustCompile(`:.*`)
+	host = re.ReplaceAllString(host, "")
+	port := p.StartPort
+	step := len(p.Servers)
+	for i, spec := range p.Servers {
+		for j, server := range spec.Names {
+			if server == name {
+				port = port + i + j*step
+			}
+		}
+	}
 
-        host = fmt.Sprintf("%s:%d\n", host, port)
-        return strings.TrimSpace(host)
+	host = fmt.Sprintf("%s:%d\n", host, port)
+	return strings.TrimSpace(host)
 }
 
 
