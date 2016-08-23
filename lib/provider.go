@@ -272,6 +272,7 @@ func (p *DockerProvider) ProvideCouchbaseServers(servers []ServerSpec) {
 					SuppressOutput: false,
 					Pull:           false,
 					BuildArgs:      buildArgs,
+                                        NoCache:        true,
 				}
 
 				// build image
