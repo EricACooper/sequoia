@@ -265,6 +265,7 @@ func (p *DockerProvider) ProvideCouchbaseServers(servers []ServerSpec) {
 			exists := p.Cm.CheckImageExists(imgName)
 			if exists == false {
 
+                                fmt.Println("ProvideCouchbaseServers creating the image with NoCache")
 				var buildArgs = BuildArgsForVersion(p.Opts)
 				var buildOpts = docker.BuildImageOptions{
 					Name:           imgName,
@@ -277,6 +278,7 @@ func (p *DockerProvider) ProvideCouchbaseServers(servers []ServerSpec) {
 
 				// build image
 				err := p.Cm.BuildImage(buildOpts)
+                                fmt.Println("done building the image")
 				logerr(err)
 			}
 
