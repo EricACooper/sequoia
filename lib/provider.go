@@ -245,6 +245,8 @@ func (p *DockerProvider) ProvideCouchbaseServers(servers []ServerSpec) {
 			hostConfig := docker.HostConfig{
 				PortBindings: portBindings,
 				Ulimits:      p.Opts.Ulimits,
+                                AutoRemove:   true,
+                                Privileged: true
 			}
 
 			if p.Opts.CPUPeriod > 0 {
