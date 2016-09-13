@@ -301,7 +301,7 @@ func (p *DockerProvider) ProvideCouchbaseServers(servers []ServerSpec) {
                         fmt.Print()
                         fmt.Print("\n\n")
                         if rc == nil {
-                            //time.Sleep( 15 * time.Second )
+                            time.Sleep( 15 * time.Second )
 			    rc = p.Cm.StartContainer(container.ID, &hostConfig)
                             fmt.Println("in provider.go, rc from StartContainer", rc, container)
                             fmt.Print("\n\n")
@@ -321,7 +321,7 @@ func (p *DockerProvider) ProvideCouchbaseServers(servers []ServerSpec) {
                         }
 		}
 	}
-	p.StartPort = freePort
+	p.StartPort = freePort - 1
 }
 
 func (p *DockerProvider) GetLinkPairs() string {
