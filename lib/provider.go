@@ -209,7 +209,7 @@ func (p *DockerProvider) GetFreeHostPort() int {
                      }
                 }
         }
-        fmt.Println("max port is", maxPort)
+        fmt.Println("Utilizing port ", maxPort+1)
         return maxPort + 1
 }
 
