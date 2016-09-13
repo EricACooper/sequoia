@@ -209,8 +209,9 @@ func (p *DockerProvider) GetFreeHostPort() int {
                      }
                 }
         }
-        fmt.Println("Utilizing port ", maxPort+1)
-        return maxPort + 1
+        // +10 is a hack because I am getting port already allocated for some obscure reason
+        fmt.Println("Utilizing port ", maxPort+10)
+        return maxPort + 10
 }
 
 func (p *DockerProvider) ProvideCouchbaseServers(servers []ServerSpec) {
