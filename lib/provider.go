@@ -221,7 +221,7 @@ func (p *DockerProvider) ProvideCouchbaseServers(servers []ServerSpec) {
 	p.Opts = &providerOpts
 	var build = p.Opts.Build
 
-        freePort := 0
+        freePort := p.GetFreeHostPort()
 
 	// start based on number of containers
 	//var i int = p.NumCouchbaseServers()
@@ -233,8 +233,8 @@ func (p *DockerProvider) ProvideCouchbaseServers(servers []ServerSpec) {
 		for _, serverName := range serverNameList {
                         fmt.Println("ProvideCouchbaseServers loop 2, the server is ", serverName)
 			//portStr := fmt.Sprintf("%d", 8091+i)
-                        freePort = p.GetFreeHostPort()
 			portStr := fmt.Sprintf("%d", freePort )
+                        freePort = freePort + 1
 			port := docker.Port("8091/tcp")
 			binding := make([]docker.PortBinding, 1)
 			binding[0] = docker.PortBinding{
