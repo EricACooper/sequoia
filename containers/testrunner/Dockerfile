@@ -20,7 +20,8 @@ RUN pip install paramiko &&\
     pip install gevent &&\
     pip install boto &&\
     pip install pyyaml &&\
-    pip install couchbase
+    pip install couchbase &&\
+    pip install ntplib
 
 COPY local.ini local.ini
 COPY upgrade_local.ini upgrade_local.ini
