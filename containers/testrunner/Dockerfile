@@ -21,6 +21,7 @@ RUN pip install paramiko &&\
     pip install boto &&\
     pip install pyyaml &&\
     pip install ntplib &&\
+    pip install httplib2 &&\
     pip install couchbase
 
 COPY local.ini local.ini
