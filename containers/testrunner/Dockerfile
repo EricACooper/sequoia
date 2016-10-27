@@ -38,7 +38,7 @@ RUN pip install paramiko &&\
     pip install futures &&\
     pip install greenlet &&\
     pip install urllib3 &&\
-    pip install btrc &&\
+    pip install btrc
 
 COPY local.ini local.ini
 COPY upgrade_local.ini upgrade_local.ini
