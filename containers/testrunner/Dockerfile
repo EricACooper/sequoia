@@ -29,7 +29,6 @@ RUN pip install paramiko &&\
     pip install mercurial &&\
     pip install paramiko &&\
     pip install pycrypto &&\
-    pip install pycurl &&\
     pip install pygpgme &&\
     pip install urlgrabber &&\
     pip install yum-metadata-parser &&\
