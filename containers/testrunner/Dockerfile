@@ -18,7 +18,6 @@ WORKDIR testrunner
 # install python deps
 RUN pip install paramiko &&\
     pip install gevent &&\
-    pip install boto &&\
     pip install pyyaml &&\
     pip install ntplib &&\
     pip install couchbase &&\
@@ -28,10 +27,6 @@ RUN pip install paramiko &&\
     pip install iniparse &&\
     pip install mercurial &&\
     pip install paramiko &&\
-    pip install pycrypto &&\
-    pip install pygpgme &&\
-    pip install urlgrabber &&\
-    pip install yum-metadata-parser &&\
     pip install httplib2 &&\
     pip install boto &&\
     pip install futures &&\
