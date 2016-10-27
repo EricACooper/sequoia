@@ -21,23 +21,24 @@ RUN pip install paramiko &&\
     pip install boto &&\
     pip install pyyaml &&\
     pip install ntplib &&\
-    pip install httplib2 &&\
+    pip install couchbase &&\
     pip install decorator &&\
     pip install ecdsa &&\
-    pip install fabric &&\
+    pip install Fabric &&\
     pip install iniparse &&\
     pip install mercurial &&\
-    pip install pygpgme &&\
+    pip install paramiko &&\
     pip install pycrypto &&\
     pip install pycurl &&\
+    pip install pygpgme &&\
     pip install urlgrabber &&\
-    pip install yum-metadata-parser  &&\
+    pip install yum-metadata-parser &&\
+    pip install httplib2 &&\
+    pip install boto &&\
     pip install futures &&\
-    pip install gevent &&\
     pip install greenlet &&\
     pip install urllib3 &&\
     pip install btrc &&\
-    pip install couchbase
 
 COPY local.ini local.ini
 COPY upgrade_local.ini upgrade_local.ini
