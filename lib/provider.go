@@ -6,6 +6,7 @@ package sequoia
 
 import (
 	"fmt"
+	"github.com/docker/docker/api/types/swarm"
 	"github.com/fsouza/go-dockerclient"
 	"net/url"
 	"regexp"
@@ -13,6 +14,18 @@ import (
 	"strings"
         "time"
 )
+
+type ProviderLabel int
+
+const ( // iota is reset to 0
+	Docker ProviderLabel = iota
+	Swarm  ProviderLabel = iota
+	File   ProviderLabel = iota
+	Dev    ProviderLabel = iota
+)
+
+const UBUNTU_OS_DIR = "Ubuntu14"
+const CENTOS_OS_DIR = "CentOS7"
 
 type Provider interface {
 	ProvideCouchbaseServers(servers []ServerSpec)
@@ -40,6 +53,10 @@ type DockerProvider struct {
 	Opts             *DockerProviderOpts
 }
 
+type SwarmProvider struct {
+	DockerProvider
+}
+
 type DockerProviderOpts struct {
 	Build            string
 	BuildUrlOverride string `yaml:"build_url_override"`
@@ -47,6 +64,7 @@ type DockerProviderOpts struct {
 	CPUQuota         int64
 	Memory           int64
 	MemorySwap       int64
+	OS               string
 	Ulimits          []docker.ULimit
 }
 
@@ -60,13 +78,23 @@ func NewProvider(flags TestFlags, servers []ServerSpec) Provider {
 
 	switch providerArgs[0] {
 	case "docker":
-		cm := NewContainerManager(*flags.Client)
+		cm := NewContainerManager(*flags.Client, "docker")
 		provider = &DockerProvider{
 			cm,
 			servers,
 			make(map[string]string),
 			8091,
 			nil,
+		}
+	case "swarm":
+		cm := NewContainerManager(*flags.Client, "swarm")
+		provider = &SwarmProvider{
+			DockerProvider{
+				cm,
+				servers,
+				make(map[string]string),
+				8091,
+				nil},
 		}
 	case "file":
 		hostFile := "default.yml"
@@ -265,15 +293,23 @@ func (p *DockerProvider) ProvideCouchbaseServers(servers []ServerSpec) {
 			}
 
 			// check if build version exists
-			var imgName = fmt.Sprintf("couchbase_%s", build)
+			var osPath = UBUNTU_OS_DIR
+			if p.Opts.OS == "centos7" {
+				osPath = CENTOS_OS_DIR
+			}
+			var imgName = fmt.Sprintf("couchbase_%s.%s",
+				build,
+				strings.ToLower(osPath))
 			exists := p.Cm.CheckImageExists(imgName)
+
 			if exists == false {
 
                                 fmt.Println("ProvideCouchbaseServers creating the image with NoCache")
 				var buildArgs = BuildArgsForVersion(p.Opts)
+				var contextDir = fmt.Sprintf("containers/couchbase/%s/", osPath)
 				var buildOpts = docker.BuildImageOptions{
 					Name:           imgName,
-					ContextDir:     "containers/couchbase/",
+					ContextDir:     contextDir,
 					SuppressOutput: false,
 					Pull:           false,
 					BuildArgs:      buildArgs,
@@ -325,6 +361,194 @@ func (p *DockerProvider) ProvideCouchbaseServers(servers []ServerSpec) {
 	p.StartPort = freePort - 1
 }
 
+func (p *SwarmProvider) ProvideCouchbaseServer(serverName string, portOffset int, zone string) {
+
+	var build = p.Opts.Build
+
+	portStr := fmt.Sprintf("%d", portOffset)
+	port := docker.Port("8091/tcp")
+	binding := make([]docker.PortBinding, 1)
+	binding[0] = docker.PortBinding{
+		HostPort: portStr,
+	}
+
+	portConfig := []swarm.PortConfig{
+		swarm.PortConfig{
+			TargetPort:    8091,
+			PublishedPort: uint32(portOffset),
+		},
+	}
+
+	var portBindings = make(map[docker.Port][]docker.PortBinding)
+	portBindings[port] = binding
+	hostConfig := docker.HostConfig{
+		PortBindings: portBindings,
+		Ulimits:      p.Opts.Ulimits,
+	}
+
+	if p.Opts.CPUPeriod > 0 {
+		hostConfig.CPUPeriod = p.Opts.CPUPeriod
+	}
+	if p.Opts.CPUQuota > 0 {
+		hostConfig.CPUQuota = p.Opts.CPUQuota
+	}
+	if p.Opts.Memory > 0 {
+		hostConfig.Memory = p.Opts.Memory
+	}
+	if p.Opts.MemorySwap != 0 {
+		hostConfig.MemorySwap = p.Opts.MemorySwap
+	}
+
+	// check if build version exists
+	var osPath = UBUNTU_OS_DIR
+	if p.Opts.OS == "centos7" {
+		osPath = CENTOS_OS_DIR
+	}
+	var imgName = fmt.Sprintf("couchbase_%s.%s",
+		build,
+		strings.ToLower(osPath))
+	exists := p.Cm.CheckImageExists(imgName)
+	if exists == false {
+
+		var buildArgs = BuildArgsForVersion(p.Opts)
+		var contextDir = fmt.Sprintf("containers/couchbase/%s/", osPath)
+		var buildOpts = docker.BuildImageOptions{
+			Name:           imgName,
+			ContextDir:     contextDir,
+			SuppressOutput: false,
+			Pull:           false,
+			BuildArgs:      buildArgs,
+		}
+
+		// build image
+		err := p.Cm.BuildImage(buildOpts)
+		logerr(err)
+	}
+
+	serviceName := strings.Replace(serverName, ".", "-", -1)
+	containerSpec := swarm.ContainerSpec{Image: imgName}
+	placement := swarm.Placement{Constraints: []string{"node.labels.zone == " + zone}}
+	taskSpec := swarm.TaskSpec{ContainerSpec: containerSpec, Placement: &placement}
+	annotations := swarm.Annotations{Name: serviceName}
+	endpointSpec := swarm.EndpointSpec{Ports: portConfig}
+	spec := swarm.ServiceSpec{
+		Annotations:  annotations,
+		TaskTemplate: taskSpec,
+		EndpointSpec: &endpointSpec,
+	}
+
+	options := docker.CreateServiceOptions{
+		ServiceSpec: spec,
+	}
+
+	_, container := p.Cm.RunContainerAsService(options, 30)
+	p.ActiveContainers[serverName] = container.ID
+
+	colorsay("start couchbase http://" + p.GetRestUrl(serverName))
+}
+
+func (p *SwarmProvider) ProvideCouchbaseServers(servers []ServerSpec) {
+
+	// read provider options
+	var providerOpts DockerProviderOpts
+	ReadYamlFile("providers/docker/options.yml", &providerOpts)
+	p.Opts = &providerOpts
+
+	// start based on number of containers
+	var i int = p.NumCouchbaseServers()
+	p.StartPort = 8091 + i
+	var j = 0
+	for _, server := range servers {
+		serverNameList := ExpandServerName(server.Name, server.Count, server.CountOffset+1)
+		for _, serverName := range serverNameList {
+			port := 8091 + i
+
+			// determin zone based on service
+			services := server.NodeServices[serverName]
+			zone := services[0]
+			go p.ProvideCouchbaseServer(serverName, port, zone)
+			i++
+			j++
+		}
+	}
+
+	for len(p.ActiveContainers) != j {
+		time.Sleep(time.Second * 1)
+	}
+	time.Sleep(time.Second * 5)
+}
+
+func (p *SwarmProvider) GetHostAddress(name string) string {
+	var ipAddress string
+
+	id, ok := p.ActiveContainers[name]
+	client := p.Cm.ClientForContainer(id)
+	if ok == false {
+		// look up container by name
+		filter := make(map[string][]string)
+		filter["name"] = []string{name}
+		opts := docker.ListContainersOptions{
+			Filters: filter,
+		}
+		containers, err := client.ListContainers(opts)
+		chkerr(err)
+		id = containers[0].ID
+	}
+	container, err := client.InspectContainer(id)
+	chkerr(err)
+	ipAddress = container.NetworkSettings.Networks["ingress"].IPAddress
+
+	return ipAddress
+}
+
+func (p *SwarmProvider) GetRestUrl(name string) string {
+
+	var restUrl string
+
+	// get port
+	port := p.StartPort
+	offset := 0
+	for _, spec := range p.Servers {
+		for _, server := range spec.Names {
+			if server == name {
+				port = port + offset
+				break
+			}
+			offset += 1
+		}
+	}
+
+	// get server for this container
+
+	containerID := p.ActiveContainers[name]
+	client := p.Cm.ClientForContainer(containerID)
+
+	clientEndpoint := client.Endpoint()
+	// extract host from endpoint
+	url, err := url.Parse(clientEndpoint)
+	if url.Scheme == "" {
+		url, err = url.Parse("http://" + clientEndpoint)
+	}
+	chkerr(err)
+	host := url.Host
+	if host == "" {
+		host = "localhost"
+	}
+
+	// remove port if specified
+	re := regexp.MustCompile(`:.*`)
+	host = re.ReplaceAllString(host, "")
+
+	// attempt to connect
+	restUrl = fmt.Sprintf("%s:%d", host, port)
+
+	return strings.TrimSpace(restUrl)
+}
+
+func (p *SwarmProvider) GetType() string {
+	return "swarm"
+}
+
 func (p *DockerProvider) GetLinkPairs() string {
 	pairs := []string{}
 	for name, _ := range p.ActiveContainers {
@@ -334,10 +558,17 @@ func (p *DockerProvider) GetLinkPairs() string {
 }
 
 func (p *DockerProvider) GetRestUrl(name string) string {
+
 	// extract host from endpoint
 	url, err := url.Parse(p.Cm.Endpoint)
+	if url.Scheme == "" {
+		url, err = url.Parse("http://" + p.Cm.Endpoint)
+	}
 	chkerr(err)
 	host := url.Host
+	if host == "" {
+		host = "localhost"
+	}
 
 	// remove port if specified
 	re := regexp.MustCompile(`:.*`)

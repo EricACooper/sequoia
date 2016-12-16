@@ -13,6 +13,12 @@ type Test struct {
 	Actions   []ActionSpec
 	Flags     TestFlags
 	Cm        *ContainerManager
+	CollMgr   *CollectionManager
+}
+
+type CollectionManager struct {
+	Ch                []chan bool
+	ActiveCollections int
 }
 
 type ActionSpec struct {
@@ -20,6 +26,7 @@ type ActionSpec struct {
 	Image       string
 	Command     string
 	Wait        bool
+	CondWait    string
 	Before      string
 	Entrypoint  string
 	Requires    string
@@ -44,6 +51,7 @@ func (a *ActionSpec) String() string {
  image: %q
  command: %q
  wait: %t
+ condwait: %q
  before: %q
  entrypoint: %q
  requires: %q
@@ -54,7 +62,7 @@ func (a *ActionSpec) String() string {
  template: %q
  args: %q
  client: %v
-`, a.Image, a.Command, a.Wait, a.Before, a.Entrypoint, a.Requires,
+`, a.Image, a.Command, a.Wait, a.CondWait, a.Before, a.Entrypoint, a.Requires,
 		a.Concurrency, a.Duration, a.Alias, a.Repeat,
 		a.Template, a.Args, a.Client)
 }
@@ -115,7 +123,10 @@ func NewTest(flags TestFlags, cm *ContainerManager) Test {
 	default:
 		actions = ActionsFromFile(*flags.TestFile)
 	}
-	return Test{templates, actions, flags, cm}
+
+	ch := []chan bool{}
+	chmgr := CollectionManager{ch, 0}
+	return Test{templates, actions, flags, cm, &chmgr}
 }
 
 func (t *Test) Run(scope Scope) {
@@ -123,12 +134,17 @@ func (t *Test) Run(scope Scope) {
 	// do optional setup
 	if *t.Flags.SkipSetup == false {
 		// if in default mode purge all containers
-		if t.Flags.Mode == "" {
-			t.Cm.RemoveAllContainers()
+		if (t.Flags.Mode != "image") && (*t.Flags.SoftCleanup == false) {
+			if scope.Provider.GetType() == "swarm" {
+				t.Cm.RemoveAllServices()
+			} else {
+				t.Cm.RemoveAllContainers()
+			}
 		}
 		scope.Provider.ProvideCouchbaseServers(scope.Spec.Servers)
 		scope.Setup()
-	} else if scope.Provider.GetType() != "docker" {
+	} else if (scope.Provider.GetType() != "docker") &&
+		(scope.Provider.GetType() != "swarm") {
 		// non-dynamic IP's need to be extrapolated before test
 		scope.Provider.ProvideCouchbaseServers(scope.Spec.Servers)
 		scope.InitCli()
@@ -159,7 +175,8 @@ func (t *Test) Run(scope Scope) {
 		for {
 			t.runActions(scope, loops, t.Actions)
 			// kill test containers
-			scope.Cm.RemoveManagedContainers(*t.Flags.SoftCleanup)
+			t.DoContainerCleanup(scope)
+
 			loops++
 		}
 	} else {
@@ -167,10 +184,13 @@ func (t *Test) Run(scope Scope) {
 		for loops = 0; loops < repeat; loops++ {
 			t.runActions(scope, loops, t.Actions)
 			// kill test containers
-			scope.Cm.RemoveManagedContainers(*t.Flags.SoftCleanup)
+			t.DoContainerCleanup(scope)
 		}
 	}
 	t.Cm.TapHandle.AutoPlan()
+
+	// wait if collect is happening
+	t.WaitForCollect()
 
 	// do optional cluster teardown
 	if *t.Flags.SkipTeardown == false {
@@ -180,6 +200,14 @@ func (t *Test) Run(scope Scope) {
 	// do optional cleanup
 	if *t.Flags.SkipCleanup == false {
 		t.Cleanup(scope)
+	}
+}
+
+// blocks when item is being collected
+func (t *Test) WaitForCollect() {
+	for i := 0; i < t.CollMgr.ActiveCollections; i++ {
+		colorsay("collect in progress")
+		<-t.CollMgr.Ch[i]
 	}
 }
 
@@ -219,6 +247,8 @@ func (t *Test) runActions(scope Scope, loop int, actions []ActionSpec) {
 					ecolorsay("no such container alias " + key)
 				}
 			case "cp":
+				// allow parsing of topath
+				action.Client.ToPath = ParseTemplate(&scope, action.Client.ToPath)
 				if id, ok := scope.GetVarsKV(key); ok {
 					t.Cm.CopyFromContainer(id,
 						PathToFilename(action.Client.ToPath),
@@ -334,9 +364,16 @@ func (t *Test) runActions(scope Scope, loop int, actions []ActionSpec) {
 			pass, err := strconv.ParseBool(ok)
 			logerr(err)
 			if pass == false {
-				colorsay("skipping due to requirements: " + action.Requires)
 				lastAction = action
 				continue
+			}
+		}
+
+		if action.CondWait != "" {
+			ok := ParseTemplate(&scope, action.CondWait)
+			ok = strings.TrimSpace(ok)
+			if wait, err := strconv.ParseBool(ok); err == nil {
+				action.Wait = wait
 			}
 		}
 
@@ -622,7 +659,15 @@ func (t *Test) WatchErrorChan(echan chan error, n int, scope *Scope) {
 	for i := 0; i < n; i++ {
 		if err := <-echan; err != nil {
 			if *t.Flags.CollectOnError == true {
+
+				// add a new collect channel
+				ch := make(chan bool)
+				t.CollMgr.Ch = append(t.CollMgr.Ch, ch)
+				t.CollMgr.ActiveCollections = len(t.CollMgr.Ch)
+
+				// start collect
 				t.CollectInfo(*scope)
+				ch <- true
 			}
 
 			if *t.Flags.StopOnError == true {
@@ -719,14 +764,26 @@ func (t *Test) ExitAfterDuration(sec int) {
 	os.Exit(0)
 }
 
+func (t *Test) DoContainerCleanup(s Scope) {
+	if s.Provider.GetType() == "swarm" {
+		s.Cm.RemoveManagedServices(*t.Flags.SoftCleanup)
+	} else {
+		s.Cm.RemoveManagedContainers(*t.Flags.SoftCleanup)
+	}
+}
+
 func (t *Test) Cleanup(s Scope) {
 	soft := *t.Flags.SoftCleanup
-	s.Cm.RemoveManagedContainers(soft)
-	if s.Provider.GetType() == "docker" {
+	t.DoContainerCleanup(s)
+	switch s.Provider.GetType() {
+	case "docker":
 		// save logs
 		if *t.Flags.LogLevel > 0 {
 			s.Provider.(*DockerProvider).Cm.SaveCouchbaseContainerLogs(*t.Flags.LogDir)
 		}
 		s.Provider.(*DockerProvider).Cm.RemoveManagedContainers(soft)
+	case "swarm":
+		s.Provider.(*SwarmProvider).Cm.RemoveManagedServices(soft)
 	}
+
 }

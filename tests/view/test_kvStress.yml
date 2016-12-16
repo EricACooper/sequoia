@@ -1,6 +1,6 @@
 ---
 -
-  include: tests/templates/rebalance.yml
+  include: tests/templates/rebalance.yml, tests/templates/vegeta.yml
 
 #============ continous kv loading a minimum of 1.5M items  at 1xScale============
 -
@@ -16,15 +16,15 @@
 
 #============ start view queries  ============
 -
-  image: sequoiatools/curloop
-  command: "view.sh {{.Orchestrator}}:8092 default scale status limit=10&stale=false"
-  concurrency: "{{.Scale 1}}"
--
-  command: "view.sh {{.Orchestrator}}:8092 default scale padd limit=10&stale=update_after"
-  concurrency: "{{.Scale 1}}"
--
-  command: "view.sh {{.Orchestrator}}:8092 default scale array stale=update_after"
-  concurrency: "{{.Scale 1}}" 
+  # run http attacks against view with various skip param
+  foreach: "{{range $i, $view := strlist `stats` `array` `padd`}}"
+  template: attack_view
+  args: "0, 10, {{$.NthDataNode $i}},
+         {{$.Bucket}},
+         scale,
+         {{$view}},
+         limit={{$.Scale 10}}&stale=update_after"
+
 
 #============ load 10k items at 1xScale============
 -
@@ -37,8 +37,7 @@
 -
   template: rebalance_out
   args: "{{.NthDataNode 1}}"
--
-  template: wait_for_rebalance
+  wait: true
 
 #============ load 100k items at 1xScale============
 -
@@ -51,8 +50,7 @@
 -
   template: rebalance_swap
   args: "{{.NthDataNode 1}}, {{.NthDataNode 2}}"
--
-  template: wait_for_rebalance
+  wait: true
 
 
 #============ update 100k items at 1xScale============
@@ -76,8 +74,7 @@
    wait: true
 -
   template: rebalance
--
-  template: wait_for_rebalance
+  wait: true
 
 #============ update 100k items at 1xScale============
 -
@@ -106,8 +103,7 @@
    wait: true
 -
   template: rebalance
--
-  template: wait_for_rebalance
+  wait: true
 
 
 
@@ -134,5 +130,4 @@
    wait: true
 -
   template: rebalance
--
-  template: wait_for_rebalance
+  wait: true

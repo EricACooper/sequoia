@@ -144,6 +144,25 @@ func (s *ScopeSpec) ApplyToAllServers(operation func(string, *ServerSpec)) {
 	s.ApplyToServers(operation, 0, 0)
 }
 
+func (s *ScopeSpec) ApplyToAllServersAsync(operation func(string, *ServerSpec, chan bool)) {
+
+	waitChans := []chan bool{}
+	for i, server := range s.Servers {
+		endIdx := len(server.Names)
+
+		for _, serverName := range server.Names[:endIdx] {
+			c := make(chan bool)
+			go operation(serverName, &server, c)
+			waitChans = append(waitChans, c)
+			s.Servers[i] = server // allowed apply func to modify server
+		}
+	}
+
+	for _, c := range waitChans {
+		<-c
+	}
+}
+
 func (s *ScopeSpec) ApplyToServers(operation func(string, *ServerSpec),
 	startIdx int, endIdx int) {
 
@@ -215,8 +234,14 @@ func NewScopeSpec(fileName string) ScopeSpec {
 
 func SpecFromYaml(fileName string) ScopeSpec {
 	var spec ScopeSpec
+
 	// init from yaml
 	ReadYamlFile(fileName, &spec)
+	ConfigureSpec(&spec)
+	return spec
+}
+
+func ConfigureSpec(spec *ScopeSpec) {
 
 	// map views to name
 	viewNameMap := make(map[string]ViewSpec)
@@ -268,8 +293,6 @@ func SpecFromYaml(fileName string) ScopeSpec {
 		// init node services
 		spec.Servers[i].InitNodeServices()
 	}
-
-	return spec
 
 }
 

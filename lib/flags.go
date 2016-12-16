@@ -34,6 +34,7 @@ type TestFlags struct {
 	LogLevel        *int
 	CleanLogs       *bool
 	CleanContainers *bool
+	Override        *string
 	DefaultFlagSet  *flag.FlagSet
 	ImageFlagSet    *flag.FlagSet
 	CleanFlagSet    *flag.FlagSet
@@ -103,7 +104,7 @@ func (f *TestFlags) AddDefaultFlags(fset *flag.FlagSet) {
 		"config file to use")
 	f.Client = fset.String(
 		"client",
-		"https://192.168.99.100:2376",
+		"unix:///var/run/docker.sock",
 		"docker client")
 	f.Provider = fset.String(
 		"provider",
@@ -175,6 +176,9 @@ func (f *TestFlags) AddDefaultFlags(fset *flag.FlagSet) {
 	f.ContainerName = fset.String(
 		"container_name", "",
 		"name container created from image")
+	f.Override = fset.String(
+		"override", "",
+		"override params, ie servers:local.count=1,servers:remote.count=1")
 }
 
 func (f *TestFlags) AddImageFlags(fset *flag.FlagSet) {

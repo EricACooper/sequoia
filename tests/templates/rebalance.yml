@@ -1,11 +1,21 @@
 # rebalance the cluster
+# $0 = optional orchestrator node
 -
   name: rebalance
   actions:
     -
       image: sequoiatools/couchbase-cli
-      command:  "rebalance -c  {{.Orchestrator}}
+      command:  "rebalance
+                -c {{if gt (len `$0`) 2}}$0{{else}}{{.Orchestrator}}{{end}}
                 -u  {{.RestUsername}} -p  {{.RestPassword}}"
+      condwait: "{{if eq `windows` .Platform }}
+                    false
+                 {{end}}"
+    -
+      # windows requires special status watching
+      requires: "{{ eq `windows` .Platform}}"
+      template: wait_for_rebalance
+      args: "$0"
 
 # rebalance out a single node
 # $0 = server to remove
@@ -15,6 +25,13 @@
     -
       image: sequoiatools/couchbase-cli
       command: "rebalance -c  {{.Orchestrator}} --server-remove $0  -u  {{.RestUsername}} -p  {{.RestPassword}}"
+      condwait: "{{if eq `windows` .Platform }}
+                    false
+                 {{end}}"
+    -
+      # windows requires special status watching
+      requires: "{{ eq `windows` .Platform}}"
+      template: wait_for_rebalance
 
 # rebalance in a single node
 # $0 = server to add
@@ -34,16 +51,18 @@
 # add a node to cluster
 # $0 server to add
 # $1 node services
+# $2 optional orchestrator
 -
-  name: add_node 
+  name: add_node
   actions:
     -
       image: sequoiatools/couchbase-cli
-      command: "server-add -c  {{.Orchestrator}}
+      command: "server-add
+           -c {{if gt (len `$2`) 2}}$2{{else}}{{.Orchestrator}}{{end}}
            --server-add $0
-           --services $1 
-           -u  {{.RestUsername}} -p  {{.RestPassword}}
-           --server-add-username {{.RestUsername}} --server-add-password  {{.RestPassword}}"
+           -u {{.RestUsername}} -p {{.RestPassword}}
+           --server-add-username {{.RestUsername}} --server-add-password {{.RestPassword}}
+           {{if ge .Version 4.0}}--services $1{{end}}"
       wait: true
 
 # swap rebalance 1x1 node
@@ -64,14 +83,38 @@
       command:  "rebalance -c  {{.Orchestrator}}
         --server-remove $1
         -u  {{.RestUsername}} -p  {{.RestPassword}}"
+    -
+      # windows requires special status watching
+      requires: "{{ eq `windows` .Platform}}"
+      template: wait_for_rebalance
 
 # waits for any current rebalance to finish
+# receives optional orchestrator arg from callee
 -
   name: wait_for_rebalance
   actions:
     -
       image: appropriate/curl
-      command: "-s -u {{.RestUsername}}:{{.RestPassword}} {{.Orchestrator}}:8091/pools/default/rebalanceProgress"
+      command: "-s -u {{.RestUsername}}:{{.RestPassword}}
+                 {{if gt (len `$0`) 2}}$0{{else}}{{.Orchestrator}}{{end}}:8091/pools/default/rebalanceProgress"
+      repeat: -1
+      until: "{{if .AllLogs `__self__`}}
+                {{with $sample:=(.TailLogs `__self__` 1 | json)}}
+                  {{eq `none` $sample.status}}
+                {{else}}
+                  {{false}}
+                {{end}}
+              {{else}}
+                {{false}}
+              {{end}}"
+
+# waits for current rebalance to finish on the cluster by IP
+-
+  name: wait_for_rebalance_by_ip
+  actions:
+    -
+      image: appropriate/curl
+      command: "-s -u {{.RestUsername}}:{{.RestPassword}} $0:8091/pools/default/rebalanceProgress"
       repeat: -1
       until: "{{if .AllLogs `__self__`}}{{eq `none` (.TailLogs `__self__` 1 | json).status}}{{else}}{{false}}{{end}}"
       wait: true
@@ -127,3 +170,32 @@
       wait: true
     -
       template: rebalance
+
+-
+  name: rebalance_stop
+  actions:
+    -
+      image: sequoiatools/couchbase-cli
+      command:  "rebalance-stop -c  {{.Orchestrator}}
+                -u  {{.RestUsername}} -p  {{.RestPassword}}"
+      wait: true
+
+# !!!depreciated - use rebalance with optional arg!!!
+# rebalance the cluster by IP
+# $0 = server to rebalance
+-
+  name: rebalance_by_ip
+  actions:
+    -
+      image: sequoiatools/couchbase-cli
+      command:  "rebalance -c  $0
+                -u  {{.RestUsername}} -p  {{.RestPassword}}"
+      condwait: "{{if eq `windows` .Platform }}
+                    false
+                 {{end}}"
+    -
+      # windows requires special status watching
+      requires: "{{ eq `windows` .Platform}}"
+      template: wait_for_rebalance
+
+

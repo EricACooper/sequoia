@@ -15,6 +15,7 @@ package sequoia
 import (
 	"fmt"
 	"github.com/streamrail/concurrent-map"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
@@ -30,10 +31,60 @@ type Scope struct {
 	Loops    int
 }
 
+func ApplyOverrides(overrides string, spec *ScopeSpec) {
+	parts := strings.Split(overrides, ",")
+	for _, component := range parts {
+		subparts := strings.Split(component, ":")
+		if len(subparts) > 2 {
+			// rejoin if already had colon
+			subparts = []string{subparts[0],
+				strings.Join(subparts[1:], ":"),
+			}
+		}
+		if len(subparts) == 2 {
+			key := subparts[0]
+			vals := strings.Split(subparts[1], ".")
+
+			switch key {
+			case "servers": // server override
+				for i, server := range spec.Servers {
+					if server.Name == vals[0] {
+						attrs := strings.Split(vals[1], "=")
+						_k := ToCamelCase(attrs[0])
+						_v := attrs[1]
+
+						// reflect to spec field
+						rspec := reflect.ValueOf(&server)
+						el := rspec.Elem()
+						val := el.FieldByName(_k)
+						switch val.Kind() {
+						case reflect.Uint8:
+							// update fuild as uint
+							u, _ := strconv.ParseUint(_v, 10, 8)
+							val.SetUint(u)
+						case reflect.String:
+							// update fuild as string
+							val.SetString(_v)
+						}
+						spec.Servers[i] = server
+					}
+				}
+			} // TODO: add in bucket, ddoc overrides
+		}
+	}
+
+}
+
 func NewScope(flags TestFlags, cm *ContainerManager) Scope {
 
 	// init from yaml or ini
 	spec := NewScopeSpec(*flags.ScopeFile)
+
+	// apply overrides
+	if params := flags.Override; params != nil {
+		ApplyOverrides(*params, &spec)
+		ConfigureSpec(&spec)
+	}
 
 	// create provider of resources for scope
 	provider := NewProvider(flags, spec.Servers)
@@ -122,7 +173,7 @@ func (s *Scope) WaitForNodes() {
 	var image = "martin/wait"
 
 	// use martin/wait container to wait for node to listen on port 8091
-	waitForNodesOp := func(name string, server *ServerSpec) {
+	waitForNodesOp := func(name string, server *ServerSpec, done chan bool) {
 
 		ip := s.Provider.GetHostAddress(name)
 		ipPort := strings.Split(ip, ":")
@@ -144,18 +195,18 @@ func (s *Scope) WaitForNodes() {
 		}
 
 		s.Cm.Run(&task)
+		done <- true
 	}
 
 	// verify nodes
-	s.Spec.ApplyToAllServers(waitForNodesOp)
-
+	s.Spec.ApplyToAllServersAsync(waitForNodesOp)
 }
 
 func (s *Scope) InitNodes() {
 
 	var image = "sequoiatools/couchbase-cli"
 
-	initNodesOp := func(name string, server *ServerSpec) {
+	initNodesOp := func(name string, server *ServerSpec, done chan bool) {
 		ip := s.Provider.GetHostAddress(name)
 		command := []string{"node-init",
 			"-c", ip,
@@ -181,10 +232,11 @@ func (s *Scope) InitNodes() {
 		}
 
 		s.Cm.Run(&task)
+		done <- true
 	}
 
 	// verify nodes
-	s.Spec.ApplyToAllServers(initNodesOp)
+	s.Spec.ApplyToAllServersAsync(initNodesOp)
 }
 
 func (s *Scope) InitCluster() {
