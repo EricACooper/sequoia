@@ -1,6 +1,6 @@
 # container os, supported values = ubuntu14, centos7
-os: centos7
-#os: ubuntu14
+#os: centos7
+os: ubuntu14
 
 # build version
 build: 4.6.0-3554
