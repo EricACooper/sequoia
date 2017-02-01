@@ -1,4 +1,4 @@
-FROM centos7/systemd
+FROM centos/systemd
 
 MAINTAINER Couchbase Docker Team <docker@couchbase.com>
 
