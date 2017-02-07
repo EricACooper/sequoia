@@ -118,7 +118,9 @@ func NewTest(flags TestFlags, cm *ContainerManager) Test {
 	var templates = make(map[string][]ActionSpec)
 	var actions []ActionSpec
 	switch flags.Mode {
-	case "image", "testrunner":
+	case "image":
+		actions = ActionsFromArgs(*flags.ImageName, *flags.ImageCommand, *flags.ImageWait)
+	case "testrunner":
 		actions = ActionsFromArgs(*flags.ImageName, *flags.ImageCommand, *flags.ImageWait)
 		if *flags.Exec == true {
 			// create new exec action
