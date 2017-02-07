@@ -118,8 +118,28 @@ func NewTest(flags TestFlags, cm *ContainerManager) Test {
 	var templates = make(map[string][]ActionSpec)
 	var actions []ActionSpec
 	switch flags.Mode {
-	case "image":
+	case "image", "testrunner":
 		actions = ActionsFromArgs(*flags.ImageName, *flags.ImageCommand, *flags.ImageWait)
+		if *flags.Exec == true {
+			// create new exec action
+			clientAction := ClientActionSpec{
+				Op:        "exec",
+				Container: "testrunner_id",
+			}
+			execAction := ActionSpec{
+				Client: clientAction,
+			}
+
+			// don't wait for testrunner to run
+			actions[0].Wait = false
+			actions[0].Alias = "testrunner_id"
+
+			// add exec action to test
+			actions = append(actions, execAction)
+
+			// no extra logging
+			*flags.LogLevel = 0
+		}
 	default:
 		actions = ActionsFromFile(*flags.TestFile)
 	}
@@ -134,7 +154,7 @@ func (t *Test) Run(scope Scope) {
 	// do optional setup
 	if *t.Flags.SkipSetup == false {
 		// if in default mode purge all containers
-		if (t.Flags.Mode != "image") && (*t.Flags.SoftCleanup == false) {
+		if (t.Flags.Mode == "") && (*t.Flags.SoftCleanup == false) {
 			if scope.Provider.GetType() == "swarm" {
 				t.Cm.RemoveAllServices()
 			} else {
@@ -142,9 +162,9 @@ func (t *Test) Run(scope Scope) {
 			}
 		}
 		scope.Provider.ProvideCouchbaseServers(scope.Spec.Servers)
-                if t.Flags.Mode != "image" {
-		    scope.Setup()
-                }
+		if t.Flags.Mode == "" {
+			scope.Setup()
+		}
 	} else if (scope.Provider.GetType() != "docker") &&
 		(scope.Provider.GetType() != "swarm") {
 		// non-dynamic IP's need to be extrapolated before test
@@ -264,6 +284,26 @@ func (t *Test) runActions(scope Scope, loop int, actions []ActionSpec) {
 				} else {
 					ecolorsay("no such container alias " + key)
 				}
+			case "exec":
+				// enter into container
+				if id, ok := scope.GetVarsKV(key); ok {
+					if err := t.Cm.ExecContainer(id); err != nil {
+						emsg := fmt.Sprintf("%s [%s] %s",
+							"failed to exec into container ",
+							id,
+							err)
+						ecolorsay(emsg)
+					} else {
+						// we are inside container, make sure it stays that way
+						*t.Flags.SkipCleanup = true
+
+						// running exec ends test
+						return
+					}
+				} else {
+					ecolorsay("no such container alias " + key)
+				}
+
 			}
 			continue
 		}
